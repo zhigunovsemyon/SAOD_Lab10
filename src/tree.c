@@ -40,7 +40,9 @@ static int Node_height(Node const * node)
 // Проверка необходимости ребалансировки
 static int isUnbalanced(ScapegoatTree const * tree, int depth)
 {
-	return depth > floor(log(tree->size) / log(1 / ALPHA));
+	// log от n по основанию 1/alpha
+	double lg = log(tree->size) / log(1 / ALPHA);
+	return depth > floor(lg);
 }
 
 // Сбор узлов поддерева в массив для перестройки
