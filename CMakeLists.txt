@@ -21,3 +21,6 @@ else()
 endif(WIN32)
 
 add_executable (${PROJECT_NAME} ${C_FILES}) 
+
+#подключение cmath
+target_link_libraries(${PROJECT_NAME} m)
