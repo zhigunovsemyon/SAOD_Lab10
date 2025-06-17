@@ -1,42 +1,31 @@
 #ifndef TREE_H_
 #define TREE_H_
-#include <stddef.h> /*size_t*/
 
-/*Функция сортировки*/
-typedef int (*compar_fn)(void const *, void const *);
 
-typedef struct {
-	compar_fn compar;	/*Функция сортировки*/
-	size_t esize;		/*Размер данных в элементе*/
-	struct TreeNode * root; /*Указатель на корень*/
-} Tree;
+// Узел дерева
+typedef struct Node {
+    int key;
+    struct Node *left;
+    struct Node *right;
+} Node;
 
-struct TreeNode {
-	struct TreeNode *l, *r, *p;
-	void * data;
-};
+// Структура дерева
+typedef struct ScapegoatTree {
+    Node *root;
+    int size; // Количество узлов в дереве
+    int maxSize; // Максимальный размер дерева для отслеживания необходимости ребалансировки
+} ScapegoatTree;
 
-/*Инициализация дерева. Принимает функцию распределения и размер данных*/
-Tree * TreeInit(size_t esize, compar_fn);
+// Инициализация дерева
+ScapegoatTree * Tree_create();
 
-/*Уничтожение дерева*/
-void TreeFree(Tree *);
+// Освобождение дерева
+void Tree_free(ScapegoatTree ** tree);
 
-/*Вставка элемента данных. Возврат true при удачной вставке, false при неудаче*/
-int TreeInsert(Tree *, void * const src);
+// Поиск нужной ячейки
+Node const * Tree_find(ScapegoatTree const * tree, int key);
 
-/*Вставка массива элементов данных. Возврат количества вставленных элементов */
-int TreeInsertArray(Tree *, void * const data, size_t arrlen);
-
-/*Удаление элемента с переданным ключом. Возврат 0 при неудаче, 1 при удаче*/
-int TreeRemove(Tree *, void * const key);
-
-/*Копирование элемента по ключу key из дерева в dest.
- * Возвращает 1 при удаче, 0 при неудаче*/
-int TreeCopy(Tree *, void * const key, void * dest);
-
-/*Проверка элемента по ключу key из дерева на наличие.
- * Возвращает 1 при удаче, 0 при неудаче*/
-int TreeBelongs(Tree *, void * const key);
+//Вставка ключа в дерево
+bool Tree_insert(ScapegoatTree * tree, int key);
 
 #endif // !TREE_H_

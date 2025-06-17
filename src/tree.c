@@ -1,234 +1,231 @@
 #include "tree.h"
-#include <assert.h>
-#include <malloc.h>  /*malloc(), free()*/
-#include <stdbool.h> /*bool*/
-#include <string.h>  /*memcpy()*/
+#include <malloc.h>
+#include <math.h>
+#include <stddef.h>
 
-typedef char byte;
+static constexpr double ALPHA = .8;
 
-static struct TreeNode ** TreeRightmostNode_(struct TreeNode ** const ogNode)
+// Создание нового узла. Возврат NULL при неудаче
+static Node * createNode(int key)
 {
-	assert(ogNode != NULL);
-	assert(*ogNode != NULL);
+	Node * node = (Node *)malloc(sizeof(Node));
+	if (!node)
+		return NULL;
 
-	return ((*ogNode)->r == NULL) ? ogNode
-				      : TreeRightmostNode_(&(*ogNode)->r);
+	node->key = key;
+	node->left = NULL;
+	node->right = NULL;
+	return node;
 }
 
-static struct TreeNode ** TreeLeftmostNode_(struct TreeNode ** const ogNode)
+// Подсчёт размера поддерева
+static int size(Node const * node)
 {
-	assert(ogNode != NULL);
-	assert(*ogNode != NULL);
-
-	return ((*ogNode)->l == NULL) ? ogNode
-				      : TreeLeftmostNode_(&(*ogNode)->l);
+	if (!node)
+		return 0;
+	return 1 + size(node->left) + size(node->right);
 }
 
-/*Очистка дерева обратным обходом LRN*/
-static void TreeFree_(struct TreeNode ** node)
+// Подсчёт высоты дерева
+static int Node_height(Node const * node)
 {
-	/*Если передана пустая ячейка*/
-	if ((*node) == NULL)
+	if (!node)
+		return 0;
+	int leftHeight = Node_height(node->left);
+	int rightHeight = Node_height(node->right);
+
+	return 1 + (leftHeight > rightHeight ? leftHeight : rightHeight);
+}
+
+// Проверка необходимости ребалансировки
+static int isUnbalanced(ScapegoatTree const * tree, int depth)
+{
+	return depth > floor(log(tree->size) / log(1 / ALPHA));
+}
+
+// Сбор узлов поддерева в массив для перестройки
+static void storeNodes(Node * node, Node ** array, int * index)
+{
+	if (!node)
 		return;
 
-	/*Очистка в ветвях*/
-	TreeFree_(&((*node)->l));
-	TreeFree_(&((*node)->r));
-
-	free(*node);
-	*node = NULL;
-	return;
+	storeNodes(node->left, array, index);
+	array[(*index)++] = node;
+	storeNodes(node->right, array, index);
 }
 
-/*Инициализация дерева. Принимает функцию распределения и размер данных*/
-Tree * TreeInit(size_t esize, compar_fn compar)
+// Построение сбалансированного поддерева из массива узлов
+static Node * buildBalanced(Node ** array, int start, int end)
 {
-	if (esize == 0 || compar == NULL)
+	if (start > end)
+		return NULL;
+	int mid = (start + end) / 2;
+	Node * node = array[mid];
+	node->left = buildBalanced(array, start, mid - 1);
+	node->right = buildBalanced(array, mid + 1, end);
+	return node;
+}
+
+// Ребалансировка поддерева. Возврат NULL при
+// неудаче создания вспомогательного массива
+static Node * rebuildSubtree(Node * node, int subtreeSize)
+{
+	Node ** nodes = (Node **)malloc((size_t)subtreeSize * sizeof(Node *));
+	if (!nodes)
 		return NULL;
 
-	Tree * pTree = (Tree *)malloc(sizeof(Tree));
-	if (!pTree)
+	int index = 0; //Вспомогательный индекс для storeNodes
+	storeNodes(node, nodes, &index);
+	Node * newRoot = buildBalanced(nodes, 0, subtreeSize - 1);
+	free(nodes);
+	return newRoot;
+}
+
+// Поиск scapegoat (узла, вызывающего несбалансированность).
+// Возвращает NULL в сбалансированном дереве.
+static Node *
+findScapegoat(Node * node, Node * inserted, int * depth, ScapegoatTree * tree)
+{
+	if (!node)
 		return NULL;
 
-	pTree->esize = esize;
-	pTree->compar = compar;
-	pTree->root = NULL;
-
-	return pTree;
-}
-
-static struct TreeNode *
-NodeNew_(struct TreeNode * p, void * const src, size_t esize)
-{
-	struct TreeNode * pNode =
-		(struct TreeNode *)malloc(sizeof(struct TreeNode) + esize);
-	if (pNode == NULL)
-		return pNode /*NULL*/;
-
-	pNode->p = p;
-	pNode->r = pNode->l = NULL;
-	pNode->data = pNode + 1;
-
-	memcpy(pNode->data, src, esize);
-	return pNode;
-}
-
-static bool TreeInsert_(struct TreeNode ** pNode,
-			struct TreeNode * pParentNode,
-			void * const src,
-			compar_fn compar,
-			size_t esize)
-{
-	if (*pNode == NULL) {
-		*pNode = NodeNew_(pParentNode, src, esize);
-		return (*pNode) ? true : false; /*true при удачной записи, false
-					    при ошибке malloc*/
+	(*depth)++;
+	if (node == inserted && isUnbalanced(tree, *depth)) {
+		return node;
 	}
-	/*Здесь и далее pNode не указывает на null-указатель*/
-	assert(*pNode != NULL);
 
-	int cmp_res = compar((*pNode)->data, src);
-
-	/*Если под pNode находится элемент, равный источнику*/
-	if (cmp_res == 0) {
-		memcpy((*pNode)->data, src, esize); /*он перезаписывается*/
-		return 1;
+	if (inserted->key < node->key) { // Поиск в левой ветви
+		Node * scapegoat =
+			findScapegoat(node->left, inserted, depth, tree);
+		if (scapegoat)
+			return scapegoat;
+		if (size(node->left) > ALPHA * size(node))
+			return node;
+	} else { // Поиск в правой ветви
+		Node * scapegoat =
+			findScapegoat(node->right, inserted, depth, tree);
+		if (scapegoat)
+			return scapegoat;
+		if (size(node->right) > ALPHA * size(node))
+			return node;
 	}
-	/*else*/
-	return (cmp_res > 0)
-		       ? TreeInsert_(&(*pNode)->l, *pNode, src, compar, esize)
-		       : TreeInsert_(&(*pNode)->r, *pNode, src, compar, esize);
+	return NULL;
 }
 
-int TreeInsertArray(Tree * pTree, void * const data, size_t arrlen)
+// Вставка узла. Возврат NULL при неудаче.
+static Node *
+Node_insert(Node * node, int key, ScapegoatTree * tree, Node ** insertedNode)
 {
-	int count = 0;
-	for (size_t i = 0; i < arrlen; ++i) {
-		if (TreeInsert(pTree, (byte *)data + i * pTree->esize))
-			++count;
-		else
-			break;
+	if (!node) {
+		tree->size++;
+		Node * new_node = createNode(key);
+		*insertedNode = new_node; // может выставить null
+		return *insertedNode;
 	}
-	return count;
-}
 
-/*Вставка элемента данных*/
-int TreeInsert(Tree * pTree, void * const src)
-{
-	return TreeInsert_(&pTree->root, NULL, src, pTree->compar,
-			   pTree->esize);
-}
-
-/*Прямой NLR поиск по дереву*/
-static struct TreeNode **
-TreeLocate_(struct TreeNode ** pNode, void * const key, compar_fn compar)
-{
-	if (*pNode == NULL)
-		return pNode;
-
-	/*Здесь и далее pNode не указывает на null-указатель*/
-	assert(*pNode != NULL);
-
-	int cmp_res = compar((*pNode)->data, key);
-
-	/*Если под pNode находится элемент, равный источнику*/
-	if (cmp_res == 0) {
-		return pNode;
+	if (key < node->key) {
+		// Попытка вставить в левой ветви
+		node->left = Node_insert(node->left, key, tree, insertedNode);
+	} else if (key > node->key) {
+		// Попытка вставить в правой ветви
+		node->right = Node_insert(node->right, key, tree, insertedNode);
 	}
-	/*else*/
-	return (cmp_res > 0) ? TreeLocate_(&(*pNode)->l, key, compar)
-			     : TreeLocate_(&(*pNode)->r, key, compar);
+
+	// Возвращение этого узла
+	return node;
 }
 
-static void NodeRemove_(struct TreeNode ** pNode)
+// Поиск ключа
+static Node const * Node_find_(Node const * node, int key)
 {
-	assert(*pNode != NULL);
-	/*Сохранение указателя на удаляемый элемент*/
-	struct TreeNode * rem = *pNode;
-	/*Элемент на замену*/
-	struct TreeNode * Replacement = NULL;
+	if (!node || node->key == key)
+		return node;
 
-	/*Если у ноды есть левый потомок, самый правый элемент в левой половине
-	 * ставится на место ноды*/
-	if (rem->l != NULL) {
-		/*Извлечение самого правого элемента*/
-		struct TreeNode ** pRightmost = TreeRightmostNode_(&rem->l);
-		assert((*pRightmost)->p != NULL);
-		Replacement = *pRightmost;
-		*pRightmost = Replacement->l; // Сносит старый указатель на
+	if (key < node->key)
+		return Node_find_(node->left, key);
 
-		/*Перестановка указателей в извлечённом элементе*/
-		Replacement->p = rem->p;
-		Replacement->l = rem->l;
-		Replacement->r = rem->r;
+	return Node_find_(node->right, key);
+}
 
-		/*Подстановка указателя в другом потомке на
-		 * новую родительскую ноду*/
-		if (rem->r != NULL)
-			rem->r->p = Replacement;
-	} else if (rem->r != NULL) {
-		/*Если у ноды нет левого потомка, но есть правый, самый левый
-		 * элемент в правой половине ставится на место ноды*/
+// Освобождение памяти
+static void Node_free(Node * node)
+{
+	if (!node)
+		return;
 
-		/*Извлечение самого левого элемента*/
-		struct TreeNode ** pLeftmost = TreeLeftmostNode_(&rem->r);
-		assert((*pLeftmost)->p != NULL);
-		Replacement = *pLeftmost;
-		*pLeftmost = Replacement->r;
+	Node_free(node->left);
+	Node_free(node->right);
+	free(node);
+}
 
-		/*Перестановка указателей в извлечённом элементе*/
-		Replacement->p = rem->p;
-		Replacement->l = rem->l;
-		Replacement->r = rem->r;
+void Tree_free(ScapegoatTree ** tree)
+{
+	Node_free((*tree)->root);
+	free(*tree);
+	*tree = NULL;
+}
 
-		/*Подстановка указателя в другом потомке на
-		 * новую родительскую ноду*/
-		if (rem->l != NULL)
-			rem->l->p = Replacement;
+// Основная функция вставки с ребалансировкой. 1 при неудаче
+bool Tree_insert(ScapegoatTree * tree, int key)
+{
+	Node * insertedNode = NULL;
+	tree->root = Node_insert(tree->root, key, tree, &insertedNode);
+	if (!insertedNode)
+		return true;
+
+	if (isUnbalanced(tree, Node_height(tree->root))) {
+		int depth = 0;
+		Node * scapegoat =
+			findScapegoat(tree->root, insertedNode, &depth, tree);
+		if (!scapegoat) // дерево сбалансировано
+			return false;
+
+		int subtreeSize = size(scapegoat);
+		Node * parent = tree->root;
+		Node * newSubtree = rebuildSubtree(scapegoat, subtreeSize);
+		if (!newSubtree) // при неудаче rebuildSubtree
+			return true;
+
+		// Найти родителя scapegoat и заменить поддерево
+		if (parent == scapegoat) {
+			tree->root = newSubtree;
+		} else {
+			while (parent->left != scapegoat &&
+			       parent->right != scapegoat) {
+				if (scapegoat->key < parent->key) {
+					parent = parent->left;
+				} else {
+					parent = parent->right;
+				}
+			}
+			if (parent->left == scapegoat) {
+				parent->left = newSubtree;
+			} else {
+				parent->right = newSubtree;
+			}
+		}
 	}
-	/*Если нода является листом, указатель будет перезаисан NULLом */
 
-	/*Подстановка на место удаляемого*/
-	*pNode = Replacement;
-	/*Очистка*/
-	free(rem);
+	if (tree->size > tree->maxSize)
+		tree->maxSize = tree->size;
+	return false;
 }
 
-/*Удаление элемента с переданным ключом*/
-int TreeRemove(Tree * pTree, void * const key)
+Node const * Tree_find(ScapegoatTree const * tree, int key)
 {
-	struct TreeNode ** pNode =
-		TreeLocate_(&pTree->root, key, pTree->compar);
-	if (*pNode == NULL)
-		return 0;
-
-	assert(*pNode != NULL);
-	NodeRemove_(pNode);
-	return 1;
+	return Node_find_(tree->root, key);
 }
 
-int TreeBelongs(Tree * pTree, void * const key)
+// Инициализация дерева
+ScapegoatTree * Tree_create()
 {
-	struct TreeNode ** pNode =
-		TreeLocate_(&pTree->root, key, pTree->compar);
-	return (*pNode != NULL) ? 1 : 0;
+	ScapegoatTree * tree = (ScapegoatTree *)malloc(sizeof(ScapegoatTree));
+	if (!tree)
+		return NULL;
+
+	tree->root = NULL;
+	tree->size = 0;
+	tree->maxSize = 0;
+	return tree;
 }
 
-/*Копирование элемента по ключу key из дерева в dest*/
-int TreeCopy(Tree * pTree, void * const key, void * dest)
-{
-	struct TreeNode ** pNode =
-		TreeLocate_(&pTree->root, key, pTree->compar);
-	if (*pNode == NULL)
-		return 0;
-	/*else*/
-	memcpy(dest, (*pNode)->data, pTree->esize);
-	return 1;
-}
-
-/*Уничтожение дерева*/
-void TreeFree(Tree * pTree)
-{
-	TreeFree_(&(pTree->root));
-	free(pTree);
-}
