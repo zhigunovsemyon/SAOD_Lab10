@@ -1,6 +1,24 @@
 #include "tree.h"
 #include <stdio.h>
 
+static void Tree_print_(Node const * n)
+{
+	if (!n)
+		return;
+
+	Tree_print_(n->left);
+
+	printf("%d\n", n->key);
+
+	Tree_print_(n->right);
+}
+
+
+static void Tree_print(ScapegoatTree const * tree)
+{
+	Tree_print_(tree->root);
+}
+
 int main()
 {
 	int a[] = {1, 4, 7, 2, 3, -8, 0};
@@ -16,6 +34,8 @@ int main()
 		Tree_insert(tree, a[i]);
 		printf("Inserted %d,\tsize: %d\n", a[i], tree->size);
 	}
+
+	Tree_print(tree);
 
 	int searchKey;
 	fputs("Введите значение: ",stdout);
