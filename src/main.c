@@ -1,4 +1,5 @@
 #include "tree.h"
+#include <assert.h>
 #include <stdio.h>
 
 static void Tree_print_(Node const * n)
@@ -13,7 +14,6 @@ static void Tree_print_(Node const * n)
 	Tree_print_(n->right);
 }
 
-
 static void Tree_print(ScapegoatTree const * tree)
 {
 	Tree_print_(tree->root);
@@ -21,11 +21,12 @@ static void Tree_print(ScapegoatTree const * tree)
 
 int main()
 {
-	int a[] = {1, 4, 7, 2, 3, -8, 0};
+	int a[] = {1,  4,  7,  2,  3, -8, 0, 11, -9, -23, -1, -63, 91, -3
+		   -2, 17, 22, -4, -19, 31, 44, -24, 23};
 	int a_size = sizeof(a) / sizeof(*a);
 
 	ScapegoatTree * tree = Tree_create();
-	if (!tree){
+	if (!tree) {
 		perror("Tree_create(): ");
 		return -1;
 	}
@@ -34,20 +35,20 @@ int main()
 		Tree_insert(tree, a[i]);
 		printf("Inserted %d,\tsize: %d\n", a[i], tree->size);
 	}
+	assert(tree->size == a_size);
 
 	Tree_print(tree);
 
 	int searchKey;
-	fputs("Введите значение: ",stdout);
-	if (1 != scanf("%d", &searchKey)){
+	fputs("Введите значение: ", stdout);
+	if (1 != scanf("%d", &searchKey)) {
 		Tree_free(&tree);
 		return 0;
 	}
 
 	// Поиск
 	Node const * result = Tree_find(tree, searchKey);
-	printf("Поиск %d: %s\n", searchKey,
-	       result ? "Найден" : "Не найден");
+	printf("Поиск %d: %s\n", searchKey, result ? "Найден" : "Не найден");
 
 	// Очистка
 	Tree_free(&tree);
