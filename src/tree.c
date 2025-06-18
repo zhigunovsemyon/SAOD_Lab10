@@ -3,10 +3,18 @@
 #include <math.h>
 #include <stddef.h>
 
-static constexpr double ALPHA = .8;
+static constexpr double ALPHA = .6;
+
+// Проверка необходимости ребалансировки (глубина > log(1/alpha) от размера)
+static bool isUnbalanced(int tree_size, int depth)
+{
+	// log от n по основанию 1/alpha
+	double lg = log(tree_size) / log(1 / ALPHA);
+	return depth > floor(lg);
+}
 
 // Создание нового узла. Возврат NULL при неудаче
-static Node * createNode(int key)
+static Node * Node_create_(int key)
 {
 	Node * node = (Node *)malloc(sizeof(Node));
 	if (!node)
@@ -19,30 +27,24 @@ static Node * createNode(int key)
 }
 
 // Подсчёт размера поддерева
-static int size(Node const * node)
+static int Node_size_(Node const * node)
 {
 	if (!node)
 		return 0;
-	return 1 + size(node->left) + size(node->right);
+	return 1 + Node_size_(node->left) + Node_size_(node->right);
 }
 
 // Подсчёт высоты дерева
-static int Node_height(Node const * node)
+static int Node_height_(Node const * node)
 {
 	if (!node)
 		return 0;
-	int leftHeight = Node_height(node->left);
-	int rightHeight = Node_height(node->right);
+	int leftHeight = Node_height_(node->left);
+	int rightHeight = Node_height_(node->right);
+	int biggerHeight =
+		(leftHeight > rightHeight ? leftHeight : rightHeight);
 
-	return 1 + (leftHeight > rightHeight ? leftHeight : rightHeight);
-}
-
-// Проверка необходимости ребалансировки
-static int isUnbalanced(ScapegoatTree const * tree, int depth)
-{
-	// log от n по основанию 1/alpha
-	double lg = log(tree->size) / log(1 / ALPHA);
-	return depth > floor(lg);
+	return 1 + biggerHeight;
 }
 
 // Сбор узлов поддерева в массив для перестройки
@@ -61,10 +63,13 @@ static Node * buildBalanced(Node ** array, int start, int end)
 {
 	if (start > end)
 		return NULL;
+
 	int mid = (start + end) / 2;
 	Node * node = array[mid];
+
 	node->left = buildBalanced(array, start, mid - 1);
 	node->right = buildBalanced(array, mid + 1, end);
+
 	return node;
 }
 
@@ -76,7 +81,7 @@ static Node * rebuildSubtree(Node * node, int subtreeSize)
 	if (!nodes)
 		return NULL;
 
-	int index = 0; //Вспомогательный индекс для storeNodes
+	int index = 0; // Вспомогательный индекс для storeNodes
 	storeNodes(node, nodes, &index);
 	Node * newRoot = buildBalanced(nodes, 0, subtreeSize - 1);
 	free(nodes);
@@ -86,51 +91,55 @@ static Node * rebuildSubtree(Node * node, int subtreeSize)
 // Поиск scapegoat (узла, вызывающего несбалансированность).
 // Возвращает NULL в сбалансированном дереве.
 static Node *
-findScapegoat(Node * node, Node * inserted, int * depth, ScapegoatTree * tree)
+findScapegoat(Node * node, Node * inserted, int * depth, int tree_size)
 {
 	if (!node)
 		return NULL;
-
 	(*depth)++;
-	if (node == inserted && isUnbalanced(tree, *depth)) {
-		return node;
-	}
 
-	if (inserted->key < node->key) { // Поиск в левой ветви
+	if (node == inserted)
+		return node;
+	if (isUnbalanced(tree_size, *depth))
+		return node;
+
+	// Поиск в левой ветви
+	if (inserted->key < node->key) {
 		Node * scapegoat =
-			findScapegoat(node->left, inserted, depth, tree);
+			findScapegoat(node->left, inserted, depth, tree_size);
 		if (scapegoat)
 			return scapegoat;
-		if (size(node->left) > ALPHA * size(node))
+		if (Node_size_(node->left) > ALPHA * Node_size_(node))
 			return node;
-	} else { // Поиск в правой ветви
+	}
+	// Поиск в правой ветви
+	else {
 		Node * scapegoat =
-			findScapegoat(node->right, inserted, depth, tree);
+			findScapegoat(node->right, inserted, depth, tree_size);
 		if (scapegoat)
 			return scapegoat;
-		if (size(node->right) > ALPHA * size(node))
+		if (Node_size_(node->right) > ALPHA * Node_size_(node))
 			return node;
 	}
 	return NULL;
 }
 
 // Вставка узла. Возврат NULL при неудаче.
-static Node *
-Node_insert(Node * node, int key, ScapegoatTree * tree, Node ** insertedNode)
+static Node * Node_insert(Node * node, int key, Node ** insertedNode)
 {
 	if (!node) {
-		tree->size++;
-		Node * new_node = createNode(key);
+		Node * new_node = Node_create_(key);
 		*insertedNode = new_node; // может выставить null
 		return *insertedNode;
+		// После возвращения нового узла,
+		// дерево "разворачивается" (см. ниже), пока не вернёт корень
 	}
 
 	if (key < node->key) {
 		// Попытка вставить в левой ветви
-		node->left = Node_insert(node->left, key, tree, insertedNode);
+		node->left = Node_insert(node->left, key, insertedNode);
 	} else if (key > node->key) {
 		// Попытка вставить в правой ветви
-		node->right = Node_insert(node->right, key, tree, insertedNode);
+		node->right = Node_insert(node->right, key, insertedNode);
 	}
 
 	// Возвращение этого узла
@@ -140,13 +149,13 @@ Node_insert(Node * node, int key, ScapegoatTree * tree, Node ** insertedNode)
 // Поиск ключа
 static Node const * Node_find_(Node const * node, int key)
 {
-	if (!node || node->key == key)
+	if (!node)
+		return node;
+	if (node->key == key)
 		return node;
 
-	if (key < node->key)
-		return Node_find_(node->left, key);
-
-	return Node_find_(node->right, key);
+	return (key < node->key) ? Node_find_(node->left, key)
+				 : Node_find_(node->right, key);
 }
 
 // Освобождение памяти
@@ -171,45 +180,50 @@ void Tree_free(ScapegoatTree ** tree)
 bool Tree_insert(ScapegoatTree * tree, int key)
 {
 	Node * insertedNode = NULL;
-	tree->root = Node_insert(tree->root, key, tree, &insertedNode);
+	tree->root = Node_insert(tree->root, key, &insertedNode);
 	if (!insertedNode)
 		return true;
 
-	if (isUnbalanced(tree, Node_height(tree->root))) {
-		int depth = 0;
-		Node * scapegoat =
-			findScapegoat(tree->root, insertedNode, &depth, tree);
-		if (!scapegoat) // дерево сбалансировано
-			return false;
+	tree->size++;
+	if (tree->size > tree->maxSize)
+		tree->maxSize = tree->size;
 
-		int subtreeSize = size(scapegoat);
-		Node * parent = tree->root;
-		Node * newSubtree = rebuildSubtree(scapegoat, subtreeSize);
-		if (!newSubtree) // при неудаче rebuildSubtree
-			return true;
+	bool const isBalanced =
+		!isUnbalanced(tree->size, Node_height_(tree->root));
+	if (isBalanced)
+		return false;
 
-		// Найти родителя scapegoat и заменить поддерево
-		if (parent == scapegoat) {
-			tree->root = newSubtree;
-		} else {
-			while (parent->left != scapegoat &&
-			       parent->right != scapegoat) {
-				if (scapegoat->key < parent->key) {
-					parent = parent->left;
-				} else {
-					parent = parent->right;
-				}
-			}
-			if (parent->left == scapegoat) {
-				parent->left = newSubtree;
+	int depth = 0;
+	Node * scapegoat =
+		findScapegoat(tree->root, insertedNode, &depth, tree->size);
+	if (!scapegoat) // дерево сбалансировано
+		return false;
+
+	int subtreeSize = Node_size_(scapegoat);
+	Node * parent = tree->root;
+	Node * newSubtree = rebuildSubtree(scapegoat, subtreeSize);
+	if (!newSubtree) // при неудаче rebuildSubtree
+		return true;
+
+	// Найти родителя scapegoat и заменить поддерево
+	if (parent == scapegoat) {
+		tree->root = newSubtree;
+	} else {
+		while (parent->left != scapegoat &&
+		       parent->right != scapegoat) {
+			if (scapegoat->key < parent->key) {
+				parent = parent->left;
 			} else {
-				parent->right = newSubtree;
+				parent = parent->right;
 			}
+		}
+		if (parent->left == scapegoat) {
+			parent->left = newSubtree;
+		} else {
+			parent->right = newSubtree;
 		}
 	}
 
-	if (tree->size > tree->maxSize)
-		tree->maxSize = tree->size;
 	return false;
 }
 
@@ -230,4 +244,3 @@ ScapegoatTree * Tree_create()
 	tree->maxSize = 0;
 	return tree;
 }
-
